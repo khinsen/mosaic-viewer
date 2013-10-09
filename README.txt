@@ -1,5 +1,6 @@
 This is a simple molecular viewer for data in Mosaic format.  It can
-read both the XML and the HDF5 formats.
+read both the XML and the HDF5 formats. Trajectories in H5MD format
+using the Mosaic module are also supported.
 
 The Mosaic viewer is still in an early stage of development. It is
 currently best suited as a tool for inspecting Mosaic data, in
@@ -11,3 +12,4 @@ Prerequisites:
   - wxpython
   - vtk
   - pyMosaic
+  - pyh5md

@@ -31,6 +31,7 @@ import wx.aui as aui
 
 import mosaic.api
 import mosaic.xml_io
+import mosaic.array_model
 
 # Rendering modes
 LINES = 0
@@ -925,6 +926,13 @@ class MainFrame(wx.Frame):
         universe = configurations.keys()[0]
         return configurations[universe]
 
+# File handling
+
+class NotATrajectoryError(Exception):
+    pass
+
+class NoConfigurationError(Exception):
+    pass
 
 def load_XML(filename):
     extension = os.path.splitext(filename)[1]
@@ -942,10 +950,72 @@ def load_XML(filename):
     finally:
         xml_file.close()
     if len(configurations) == 0:
-        raise ValueError("no configuration in %s" % filename)
+        raise NoConfigurationError(filename)
     return configurations
 
-def load_HDF5(filename):
+class H5MDTrajectory(object):
+
+    def __init__(self, filename):
+        import mosaic.hdf5
+        import pyh5md
+        try:
+            f = pyh5md.H5MD_File(filename, 'r')
+            f.check()
+        except:
+            raise NotATrajectoryError(filename)
+        try:
+            universe_group = f.f['mosaic/universe']
+        except:
+            raise NotATrajectoryError(filename)
+        pg = f.particles_group('universe')
+        mosaic_store = mosaic.hdf5.HDF5Store(f.f['mosaic'])
+
+        self.universe = mosaic_store.retrieve('universe')
+        self.position = pg.trajectory('position')
+
+        self.nsteps = self.position['step'].shape[0]
+        position_dtype = self.position['value'].dtype
+        # TODO: check units and compute conversion factors
+
+        if self.universe.cell_shape == 'infinite':
+            self.box = None
+            self._convertBoxParams = \
+               lambda _: np.empty(self.universe.cell_parameter_array_shape,
+                                  position_dtype)
+        else:
+            # pyh5md supports only constant box sizes for now,
+            # so we just read it in immediately.
+            self.box = pg.trajectory('box')['edges'][...]
+            # The conversion to Mosaic layout is already optimized
+            # for time-dependent box sizes.
+            if self.universe.cell_shape == 'cube':
+                self._convertBoxParams = self._convertBoxParamsCube
+            elif self.universe.cell_shape == 'cuboid':
+                self._convertBoxParams = self._convertBoxParamsCuboid
+            elif self.universe.cell_shape == 'parallelepiped':
+                self._convertBoxParams = self._convertBoxParamsParallelepiped
+            else:
+                raise ValueError("Unknown cell shape %s"
+                                 % self.universe.cell_shape)
+    def __len__(self):
+        return self.nsteps
+
+    def __getitem__(self, item):
+        coordinates = self.position.read_slice(item)
+        cell_parameters = self._convertBoxParams(self.box)
+        return mosaic.array_model.Configuration(self.universe, coordinates,
+                                                cell_parameters)
+
+    def _convertBoxParamsCube(self, h5md_box):
+        return h5md_box[0]
+
+    def _convertBoxParamsCuboid(self, h5md_box):
+        return h5md_box
+
+    def _convertBoxParamsParallelepiped(self, h5md_box):
+        return h5md_box
+
+def load_HDF5_configurations(filename):
     import mosaic.hdf5
     universe_path = {}
     universe_referenced = {}
@@ -972,8 +1042,16 @@ def load_HDF5(filename):
     for universe_id in delete:
         del universe_path[universe_id]
     if len(configurations) == 0:
-        raise ValueError("no configuration in %s" % filename)
+        raise NoConfigurationError(filename)
     return configurations
+
+def load_HDF5(filename):
+    try:
+        traj = H5MDTrajectory(filename)
+        return {traj.universe: traj}
+    except NotATrajectoryError:
+        return load_HDF5_configurations(filename)
+
 
 if __name__ == "__main__":
 
