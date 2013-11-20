@@ -955,7 +955,9 @@ def load_HDF5(filename):
     # should be implemented later.
     for path, data_item in mosaic.hdf5.HDF5Store(filename).recursive_iterator():
         if isinstance(data_item, mosaic.api.MosaicUniverse):
-            universe_path[id(data_item)] = path
+            key = id(data_item)
+            universe_path[key] = path
+            universe_referenced[key] = False
         if isinstance(data_item, mosaic.api.MosaicConfiguration):
             key = id(data_item.universe)
             universe_referenced[key] = True
